@@ -3,30 +3,131 @@
 #include <cstring>
 #include <cmath>
 #include <iostream>
+using namespace std;
 
 #define HEX( x, len ) std::setw(2 * len) << std::setfill('0') << std::hex << std::uppercase << (((1ll << (8 * len)) - 1) & (unsigned int)( x )) << std::dec
 
 namespace Blockchain
 {
-    Block::Block(const char* str)
+    uint64_t read_varint(const char* str, size_t& delta)
     {
-        memcpy(this, str, 88);
+        uint64_t output = 0;
 
-        uint8_t trans;
-        uint8_t delta = 0;
-        memcpy(&trans, str + 88, 1);
-
-        if (trans < 0xFD)
-            n_transactions = trans, delta = 1;
-        else if (trans == 0xFD)
-            n_transactions = *(uint16_t*)(str + 88), delta = 2;
-        else if (trans == 0xFE)
-            n_transactions = *(uint32_t*)(str + 88), delta = 4;
+        memcpy(&output, str, 1);
+        if (output < 0xFD)
+            delta += 1;
+        else if (output == 0xFD)
+            output = *(uint16_t*)(str + 1), delta += 3;
+        else if (output == 0xFE)
+            output = *(uint32_t*)(str + 1), delta += 5;
         else
-            n_transactions = *(uint64_t*)(str + 88), delta = 8;
+            output = *(uint64_t*)(str + 1), delta += 9;
 
-        payload = new char[block_size - 81];
-        memcpy(payload, str + 88 + delta, block_size - 80 - 1);
+        return output;
+    }
+
+    InputTransaction::InputTransaction(const char* in, size_t &offset)
+    {
+        memcpy(this, in + offset, 36);
+        offset += 36;
+
+        sign_public_length = read_varint(in + offset, offset);
+
+        sign_public_key = new uint8_t[sign_public_length];
+        memcpy(sign_public_key, in + offset, sign_public_length);
+        offset += sign_public_length;
+
+        memcpy(&seq_no, in + offset, 4);
+        offset += 4;
+    }
+
+    std::ostream& operator<< (std::ostream& out, const InputTransaction& in_tran)
+    {
+        out << "\t\tPrevious Transaction Hash: ";
+        for (int i = 31; i >= 0; --i)
+            out << HEX(in_tran.prev_trans_hash[i], 1);
+        out << endl << "\t\tOutput Index: " << HEX(in_tran.output_index, 4) << endl;
+        out << "\t\tScript Signature Length: " << in_tran.sign_public_length << endl;
+        out << "\t\tScript Signature: ";
+        for (int i = in_tran.sign_public_length - 1; i >= 0; --i)
+            out << HEX(in_tran.sign_public_key[i], 1);
+        out << endl << "\t\tSequence Number: " << HEX(in_tran.seq_no, 4) << endl;
+        return out;
+    }
+
+    InputTransaction::~InputTransaction()
+    {
+        delete[] sign_public_key;
+    }
+
+    OutputTransaction::OutputTransaction(const char* in, size_t &offset)
+    {
+        memcpy(&coin_value, in + offset, 8);
+        offset += 8;
+
+        out_script_len = read_varint(in + offset, offset);
+
+        script_public_key = new uint8_t[out_script_len];
+        memcpy(script_public_key, in + offset, out_script_len);
+        offset += out_script_len;
+    }
+
+    std::ostream& operator<< (std::ostream& out, const OutputTransaction& out_tran)
+    {
+        out << "\t\tCoin Value: " << out_tran.coin_value << " (" << (out_tran.coin_value * 1.0 / 100000000.00) << " bitcoins)" << endl;
+        out << "\t\tOutput Script length: " << out_tran.out_script_len << endl;
+        out << "\t\tOutput Script: ";
+        for (int i = out_tran.out_script_len - 1; i >= 0; --i)
+            out << HEX(out_tran.script_public_key[i], 1);
+        out << endl;
+        return out;
+    }
+
+    OutputTransaction::~OutputTransaction()
+    {
+        delete[] script_public_key;
+    }
+
+    Transaction::Transaction(const char* in, size_t &offset)
+    {
+        memcpy(&version, in + offset, 4);
+        offset += 4;
+
+        n_inputs = read_varint(in + offset, offset);
+        for (int i = 0; i < n_inputs; ++i)
+            inputs.emplace_back(in, offset);
+
+        n_outputs = read_varint(in + offset, offset);
+        for (int i = 0; i < n_outputs; ++i)
+            outputs.emplace_back(in, offset);
+    }
+
+    std::ostream& operator<< (std::ostream& out, const Transaction& tran)
+    {
+        out << "\tVersion: " << tran.version << endl;
+        out << "\tNumber of inputs: " << tran.n_inputs << endl;
+        for (int i = 0; i < tran.n_inputs; ++i)
+            out << "\tInput " << i << ":" << endl << tran.inputs[i];
+
+        out << "\tNumber of outputs: " << tran.n_outputs << endl;
+        for (int i = 0; i < tran.n_outputs; ++i)
+            out << "\tOutput " << i << ":" << endl << tran.outputs[i];
+
+        return out;
+    }
+
+    Block::Block(const char* in, size_t& offset)
+    {
+        memcpy(this, in + offset, 88);
+        offset += 88;
+
+        n_transactions = read_varint(in + offset, offset);
+
+        for (int i = 0; i < n_transactions; ++i)
+            transactions.emplace_back(in, offset);
+
+        memcpy(&lock_time, in + offset, 4);
+        offset += 4;
     }
 
     uint8_t* Block::get_block_hash() const
@@ -67,13 +168,14 @@ namespace Blockchain
 
         out << "\tDifficulty: " << HEX(block.header.difficulty, 4) << std::endl;
         out << "\tNonce: " << block.header.nonce << std::endl;
-        out << "\tNumber of Transactions: " << block.n_transactions << std::endl;
-        return out;
-    }
+        out << "Number of Transactions: " << block.n_transactions << std::endl;
+        for (int i = 0; i < block.n_transactions; ++i)
+            out << "Transaction " << i << ": " << endl << block.transactions[i];
 
-    Block::~Block()
-    {
-        delete[] payload;
+        out << "Lock time: ";
+        temp = block.lock_time;
+        out << std::put_time(std::gmtime(&temp), "%Y-%m-%d %I:%M:%S %p") << std::endl;
+        return out;
     }
 
     inline auto min(int a, int b)

@@ -23,12 +23,11 @@ int main()
 {
     auto contents = get_file_contents(FILE_PATH);
 
-    for (size_t offset = 0, i = 0; offset + sizeof(Blockchain::Block) <= contents.size(); ++i)
+    for (size_t offset = 0, i = 0; i < 4; ++i)
     {
-        Blockchain::Block b(contents.c_str() + offset);
+        Blockchain::Block b(contents.c_str(), offset);
         cout << "==================================== Blockchain number " << i << " ====================================" << endl;
         cout << b << endl;
-        offset += b.block_size + 8;
     }
     return 0;
 }
