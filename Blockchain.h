@@ -19,7 +19,7 @@ namespace Blockchain
         std::uint32_t magic_number{};
         std::uint32_t block_size{};
         BlockHeader header{};
-        std::uint8_t n_transactions{};
+        std::uint64_t n_transactions{};
         char* payload{};
 
         explicit Block(const char*);

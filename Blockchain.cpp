@@ -10,10 +10,23 @@ namespace Blockchain
 {
     Block::Block(const char* str)
     {
-        constexpr size_t reads = sizeof(magic_number) + sizeof(block_size) + sizeof(header) + sizeof(n_transactions);
-        memcpy(this, str, reads);
-        payload = new char[block_size - 80 - 1];
-        memcpy(payload, str + reads, block_size - 80 - 1);
+        memcpy(this, str, 88);
+
+        uint8_t trans;
+        uint8_t delta = 0;
+        memcpy(&trans, str + 88, 1);
+
+        if (trans < 0xFD)
+            n_transactions = trans, delta = 1;
+        else if (trans == 0xFD)
+            n_transactions = *(uint16_t*)(str + 88), delta = 2;
+        else if (trans == 0xFE)
+            n_transactions = *(uint32_t*)(str + 88), delta = 4;
+        else
+            n_transactions = *(uint64_t*)(str + 88), delta = 8;
+
+        payload = new char[block_size - 81];
+        memcpy(payload, str + 88 + delta, block_size - 80 - 1);
     }
 
     uint8_t* Block::get_block_hash() const
@@ -48,12 +61,13 @@ namespace Blockchain
             out << HEX(res[i], 1);
         delete[] res;
 
-        out << std::endl << "\tTime of Transaction: ";
+        out << std::endl << "\tTime of Block Creation: ";
         std::time_t temp = block.header.time;
         out << std::put_time(std::gmtime(&temp), "%Y-%m-%d %I:%M:%S %p") << std::endl;
 
         out << "\tDifficulty: " << HEX(block.header.difficulty, 4) << std::endl;
         out << "\tNonce: " << block.header.nonce << std::endl;
+        out << "\tNumber of Transactions: " << block.n_transactions << std::endl;
         return out;
     }
 
