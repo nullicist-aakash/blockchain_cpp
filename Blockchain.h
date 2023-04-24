@@ -50,10 +50,14 @@ namespace Blockchain
         std::vector<InputTransaction> inputs;
         std::uint64_t n_outputs;
         std::vector<OutputTransaction> outputs;
+        std::uint32_t lock_time;
+
+        // Non stored fields
+        std::uint8_t* transaction_hash;
 
         Transaction(const char*, size_t&);
-
         friend std::ostream& operator<< (std::ostream&, const Transaction&);
+        ~Transaction();
     };
 
     struct Block
@@ -63,10 +67,13 @@ namespace Blockchain
         BlockHeader header{};
         std::uint64_t n_transactions{};
         std::vector<Transaction> transactions;
-        std::uint32_t lock_time;
 
         explicit Block(const char*, size_t&);
+
         [[nodiscard("Heap allocated object should be freed")]] std::uint8_t* get_block_hash() const;
+
+        [[nodiscard("Heap allocated object should be freed")]] std::uint8_t* calculate_merkle_hash() const;
+
         friend std::ostream& operator<< (std::ostream&, const Block&);
     };
 

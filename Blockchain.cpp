@@ -26,6 +26,20 @@ namespace Blockchain
         return output;
     }
 
+    uint8_t* calculate_double_hash(void* start, size_t len)
+    {
+        SHA256 sha1;
+        sha1.update(std::string((char*)start, (char*)start + len));
+        uint8_t * dest = sha1.digest();
+
+        SHA256 sha2;
+        sha2.update(std::string(dest, dest + 32));
+        delete[] dest;
+
+        dest = sha2.digest();
+        return dest;
+    }
+
     InputTransaction::InputTransaction(const char* in, size_t &offset)
     {
         memcpy(this, in + offset, 36);
@@ -90,7 +104,8 @@ namespace Blockchain
 
     Transaction::Transaction(const char* in, size_t &offset)
     {
-        memcpy(&version, in + offset, 4);
+        auto start = offset;
+        version = *(uint32_t*)(in + offset);
         offset += 4;
 
         n_inputs = read_varint(in + offset, offset);
@@ -100,12 +115,22 @@ namespace Blockchain
         n_outputs = read_varint(in + offset, offset);
         for (int i = 0; i < n_outputs; ++i)
             outputs.emplace_back(in, offset);
+
+        memcpy(&lock_time, in + offset, 4);
+        offset += 4;
+
+        this->transaction_hash = calculate_double_hash((void*)(in + start), offset - start);
     }
 
     std::ostream& operator<< (std::ostream& out, const Transaction& tran)
     {
         out << "\tVersion: " << tran.version << endl;
-        out << "\tNumber of inputs: " << tran.n_inputs << endl;
+
+        out << "\tTransaction Hash (Calculated): ";
+        for (int i = 31; i >= 0; --i)
+            out << HEX(tran.transaction_hash[i], 1);
+
+        out << endl << "\tNumber of inputs: " << tran.n_inputs << endl;
         for (int i = 0; i < tran.n_inputs; ++i)
             out << "\tInput " << i << ":" << endl << tran.inputs[i];
 
@@ -113,7 +138,15 @@ namespace Blockchain
         for (int i = 0; i < tran.n_outputs; ++i)
             out << "\tOutput " << i << ":" << endl << tran.outputs[i];
 
+        out << "\tLock time: ";
+        std::time_t temp = tran.lock_time;
+        out << std::put_time(std::gmtime(&temp), "%Y-%m-%d %I:%M:%S %p") << std::endl;
         return out;
+    }
+
+    Transaction::~Transaction()
+    {
+        delete[] this->transaction_hash;
     }
 
     Block::Block(const char* in, size_t& offset)
@@ -125,23 +158,54 @@ namespace Blockchain
 
         for (int i = 0; i < n_transactions; ++i)
             transactions.emplace_back(in, offset);
-
-        memcpy(&lock_time, in + offset, 4);
-        offset += 4;
     }
 
     uint8_t* Block::get_block_hash() const
     {
-        SHA256 sha1;
-        sha1.update(std::string((char*)&header, (char*)&header + sizeof(header)));
-        uint8_t * dest = sha1.digest();
+        return calculate_double_hash((void*)&header, sizeof(header));
+    }
 
-        SHA256 sha2;
-        sha2.update(std::string(dest, dest + 32));
-        delete[] dest;
+    uint8_t* Block::calculate_merkle_hash() const
+    {
+        const auto& sz = this->n_transactions;
 
-        dest = sha2.digest();
-        return dest;
+        if (sz == 1)
+        {
+            auto ret = new uint8_t[32];
+            memcpy(ret, this->transactions[0].transaction_hash, 32);
+            return ret;
+        }
+
+        auto hashes_mem = new uint8_t[(sz + (sz % 2)) * 32];
+        for (int i = 0 ; i < n_transactions; ++i)
+            memcpy(hashes_mem + i * 32, transactions[i].transaction_hash, 32);
+
+        if (sz % 2)
+            memcpy(hashes_mem + sz * 32, transactions.back().transaction_hash, 32);
+
+        auto cur_sz = (sz + (sz % 2));
+        while (cur_sz > 1)
+        {
+            if (cur_sz % 2)
+            {
+                memcpy(hashes_mem + cur_sz * 32, hashes_mem + (cur_sz - 1) * 32, 32);
+                cur_sz++;
+            }
+
+            for (int i = 0; i < cur_sz; i += 1)
+            {
+                auto hash = calculate_double_hash(hashes_mem + i * 64, 64);
+                memcpy(hashes_mem + i * 32, hash, 32);
+                delete[] hash;
+            }
+
+            cur_sz /= 2;
+        }
+
+        auto ret = new uint8_t[32];
+        memcpy(ret, hashes_mem, 32);
+        delete[] hashes_mem;
+        return ret;
     }
 
     std::ostream& operator<< (std::ostream& out, const Block& block)
@@ -149,32 +213,36 @@ namespace Blockchain
         out << "Magic Number: " << HEX(block.magic_number, 4) << std::endl;
         out << "Blockchain Size: " << block.block_size << std::endl;
         out << "Header Info: " << std::endl;
-        out << "\tVersion Number: " << block.header.version_number << std::endl;
-        out << "\tPrevious Hash: ";
+        out << "\tVersion Number          : " << block.header.version_number << std::endl;
+        out << "\tPrevious Hash           : ";
         for (int i = 31; i >= 0; --i)
             out << HEX(block.header.prev_hash[i], 1);
-        out << std::endl << "\tMerkle Hash:   ";
+        out << std::endl << "\tMerkle Hash (Stored)    : ";
         for (int i = 31; i >= 0; --i)
             out << HEX(block.header.merkle_hash[i], 1);
-        out << std::endl << "\tCurrent Hash:  ";
+        out << std::endl << "\tMerkle Hash (Calculated): ";
+
+        auto calculated_merkle = block.calculate_merkle_hash();
+        for (int i = 31; i >= 0; --i)
+            out << HEX(calculated_merkle[i], 1);
+        delete[] calculated_merkle;
+
+        out << std::endl << "\tCurrent Hash            : ";
         auto res = block.get_block_hash();
         for (int i = 31; i >= 0; --i)
             out << HEX(res[i], 1);
         delete[] res;
 
-        out << std::endl << "\tTime of Block Creation: ";
+        out << std::endl << "\tTime of Block Creation  : ";
         std::time_t temp = block.header.time;
         out << std::put_time(std::gmtime(&temp), "%Y-%m-%d %I:%M:%S %p") << std::endl;
 
-        out << "\tDifficulty: " << HEX(block.header.difficulty, 4) << std::endl;
-        out << "\tNonce: " << block.header.nonce << std::endl;
+        out << "\tDifficulty              : " << HEX(block.header.difficulty, 4) << std::endl;
+        out << "\tNonce                   : " << block.header.nonce << std::endl;
         out << "Number of Transactions: " << block.n_transactions << std::endl;
         for (int i = 0; i < block.n_transactions; ++i)
             out << "Transaction " << i << ": " << endl << block.transactions[i];
 
-        out << "Lock time: ";
-        temp = block.lock_time;
-        out << std::put_time(std::gmtime(&temp), "%Y-%m-%d %I:%M:%S %p") << std::endl;
         return out;
     }
 
@@ -188,7 +256,7 @@ namespace Blockchain
         for (int i = 0; i < ((int)len >> 4) + (len % 16 ? 1 : 0); ++i)
         {
             int start = i * 16;
-            int end = min(i * 16 + 15, (int)len);
+            int end = min(i * 16 + 15, (int)len - 1);
             std::cout << "0x" << HEX(start, 4) << " | ";
             for (int j = start; j <= end; ++j)
                 std::cout << HEX(str[j], 1) << " ";
