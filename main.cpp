@@ -64,7 +64,7 @@ uint64_t read_varint(const char* str, size_t& delta)
     return output;
 }
 
-int main(int argc, char** argv)
+int main1(int argc, char** argv)
 {
     if (argc != 2)
     {
