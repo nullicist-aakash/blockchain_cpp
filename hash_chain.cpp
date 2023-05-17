@@ -1,137 +1,72 @@
 #include <iostream>
-#include <unistd.h>
-#include <random> // for random number generator
-#include <iomanip>
-#include "SHA/sha256.h"
-#define HEX( x, len ) std::setw(2 * len) << std::setfill('0') << std::hex << std::uppercase << (((1ll << (8 * len)) - 1) & (unsigned int)( x )) << std::dec
+#include <vector>
 
 using namespace std;
 
-struct ListNode
+class SegmentTree
 {
-    int value;
-    char prev_hash[32];
-    ListNode* prev;
-};
+    vector<int> tree;
+    const int n;
 
-struct List
-{
-    ListNode* tail;
-    char tail_hash[32];
-};
-
-// Inserts an integer to the end of linked list
-void append(List& list, int value)
-{
-    auto new_node = new ListNode;
-    memset(new_node, 0, sizeof(ListNode));
-
-    // Initialise the entries of new tail
-    new_node->value = value;
-    new_node->prev = list.tail;
-    memcpy(new_node->prev_hash, list.tail_hash, 32);
-
-    // Calculate hash of new node
-    SHA256 sha;
-    sha.update((uint8_t*)new_node, sizeof(ListNode));
-    auto digest = sha.digest();
-
-    // Update the list
-    list.tail = new_node;
-    memcpy(list.tail_hash, digest, 32);
-
-    // Delete the hash from heap, as it is copied in list
-    delete[] digest;
-}
-
-// Verifies that the list is intact
-void verify_list(List& list)
-{
-    if (list.tail == nullptr)
+    // return the computed value for the nodes
+    static int compute(int a, int b)
     {
-        cout << "List is empty" << endl;
-        return;
+        return a + b;
     }
 
-    auto current = list.tail;
-    char expected_hash[32];
-    memcpy(expected_hash, list.tail_hash, 32);
-
-    while (current)
+public:
+    explicit SegmentTree(vector<int> &arr) : n { (int)arr.size() }, tree{ }
     {
-        // Calculate hash of current node
-        SHA256 sha;
-        sha.update((uint8_t*)current, sizeof(ListNode));
-        auto digest = sha.digest();
+        // Fill Leaf nodes
+        tree.resize(2 * n - 1);
+        for (int i = 0; i < n; ++i)
+            tree[i + arr.size()] = arr[i];
 
-        // Print the information about node
-        cout << "Node value is: " << current->value << endl;
-        cout << "Expected node hash: ";
-        for (auto &x: expected_hash)
-            cout << HEX(x, 1);
-        cout << endl;
+        // Fill internal nodes
+        for (auto i = n - 1; i > 0; --i)
+            tree[i] = compute(tree[i << 1], tree[i << 1 | 1]);
+    }
 
-        cout << "Computed hash:      ";
-        for (int i = 0; i < 32; ++i)
-            cout << HEX(digest[i], 1);
-        cout << endl;
+    // set value at position p
+    void modify(int p, int value)
+    {
+        for (tree[p += n] = value; p > 1; p >>= 1)
+            tree[p >> 1] = compute(tree[p], tree[p ^ 1]);
+    }
 
-        // Compare the hash of current node with the hash stored in list
-        if (memcmp(digest, expected_hash, 32) != 0)
+    // sum on interval [l, r)
+    int query(int l, int r)
+    {
+        int res = 0;
+
+        // go up the tree till left and right computations meet
+        for (l += n, r += n; l < r; l >>= 1, r >>= 1)
         {
-            cout << "List content is changed!!!" << endl;
-            delete[] digest;
-            return;
+            if (l & 1) res = compute(res, tree[l++]);
+            if (r & 1) res = compute(res, tree[--r]);
         }
 
-        // Delete the hash from heap, as it is copied in list
-        delete[] digest;
-
-        // Move to previous node
-        memcpy(expected_hash, current->prev_hash, 32);
-        current = current->prev;
+        // return the result
+        return res;
     }
+};
 
-    cout << "We reached the beginning of list!" << endl;
-}
 
 int main()
 {
-    // Create an empty list
-    List list;
-    list.tail = nullptr;
-    memset(list.tail_hash, 0, 32);
+    vector<int> arr {5, -3, 6, 1, 0, -4, 11, 6, 2, 7};
+    SegmentTree st(arr);
 
-    // Insert random 5 elements to list
-    std::mt19937 mt{std::random_device{}() }; // Instantiate a 32-bit Mersenne Twister
+    // Compute the answer for [2, 6]. This means we compute the answer for [2, 7)
+    cout << "Sum for range [2, 6] is: " << st.query(2, 7) << endl;
 
-    for (int i = 0; i < 5; ++i)
-        append(list, (int)mt());
+    // Compute the answer for [0, 3]. This means we compute the answer for [0, 4)
+    cout << "Sum for range [0, 3] is: " << st.query(0, 4) << endl;
 
-    // Verify the list
-    cout << "Verify initial list: " << endl;
-    verify_list(list);
+    // Change the element at index 4 to 36
+    cout << "Updating the value at index 4 to 36" << endl;
+    st.modify(4, 36);
 
-    // Change the content of some random index
-    auto current = list.tail->prev->prev;
-    auto old_val = current->value;
-    current->value = 0;
-
-    // Verify if our program detects the change
-    cout << endl << endl << "After change the value of third node to 0: " << endl;
-    verify_list(list);
-
-    // Resets the value
-    current->value = old_val;
-
-    // Delete the head of list
-    auto next_head = list.tail;
-    while (next_head->prev->prev != nullptr)
-        next_head = next_head->prev;
-
-    next_head->prev = nullptr;
-
-    // Check if our list detects the change!
-    cout << endl << endl << "After removing the head from the list: " << endl;
-    verify_list(list);
+    // Compute the answer for [1, 6]. This means we compute the answer for [1, 7)
+    cout << "Sum for range [1, 6] is: " << st.query(1, 7) << endl;
 }
