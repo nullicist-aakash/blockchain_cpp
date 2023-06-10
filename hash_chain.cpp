@@ -52,7 +52,7 @@ public:
 };
 
 
-int main()
+int main2()
 {
     vector<int> arr {5, -3, 6, 1, 0, -4, 11, 6, 2, 7};
     SegmentTree st(arr);
