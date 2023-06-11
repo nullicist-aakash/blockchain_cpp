@@ -227,6 +227,9 @@ int main(int argc, char** argv)
             hashes.push_back(double_sha256((uint8_t*)(start_address), transaction_len));
         }
 
+        // Compute the merkle hash from transactions
+        merkle_hash(hashes);
+
         std::cout << "\tMerkle Hash (Computed)   : ";
         for (int j = 31; j >= 0; --j)
             std::cout << HEX(hashes[0][j], 1);
